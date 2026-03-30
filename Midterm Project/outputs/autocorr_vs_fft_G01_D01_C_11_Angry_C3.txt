@@ -1,0 +1,5 @@
+Audio: /Users/MONSTER/Desktop/signal/data/Dataset/GROUP_01/G01_D01_C_11_Angry_C3.wav
+Sample rate: 44100
+Autocorrelation F0 (Hz): 277.36
+FFT peak F0 (Hz): 280.13
+Difference (Hz): 2.77

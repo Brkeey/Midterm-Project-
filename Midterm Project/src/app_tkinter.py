@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import pandas as pd
 
-from classifier import predict_gender_rule_based
+from classifier import predict_emotion, predict_gender_rule_based
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +36,7 @@ class TkClassifierApp:
         self.stats = pd.read_csv(STATS_PATH) if STATS_PATH.exists() else pd.DataFrame()
 
         self.data = self.features.merge(
-            self.meta[["File_Name", "Audio_Path"]],
+            self.meta[["File_Name", "Audio_Path", "Feeling"]],
             on="File_Name",
             how="left",
         )
@@ -130,12 +130,45 @@ class TkClassifierApp:
         row = row_df.iloc[0]
         f0 = row.get("Avg_F0_Hz", float("nan"))
         pred = predict_gender_rule_based(float(f0)) if pd.notna(f0) else "Unknown"
+        zcr = row.get("Avg_ZCR_per_s", float("nan"))
+        energy = row.get("Avg_Energy", float("nan"))
+        voiced_ratio = row.get("Voiced_Frame_Ratio", float("nan"))
+        sc = row.get("Spectral_Centroid_Mean", float("nan"))
+        sb = row.get("Spectral_Bandwidth_Mean", float("nan"))
+        sroll = row.get("Spectral_Rolloff_Mean", float("nan"))
+        sf = row.get("Spectral_Flatness_Mean", float("nan"))
+        m1 = row.get("MFCC1_Mean", float("nan"))
+        m2 = row.get("MFCC2_Mean", float("nan"))
+        m3 = row.get("MFCC3_Mean", float("nan"))
+        m4 = row.get("MFCC4_Mean", float("nan"))
+        m5 = row.get("MFCC5_Mean", float("nan"))
+        pred_emotion = (
+            predict_emotion(
+                float(f0),
+                float(zcr),
+                float(energy),
+                float(voiced_ratio),
+                float(sc),
+                float(sb),
+                float(sroll),
+                float(sf),
+                float(m1),
+                float(m2),
+                float(m3),
+                float(m4),
+                float(m5),
+            )
+            if pd.notna(f0) and pd.notna(zcr) and pd.notna(energy) and pd.notna(voiced_ratio)
+            else "Unknown"
+        )
 
         details = (
             f"File: {file_name}\n"
             f"Audio Path: {row.get('Audio_Path', '')}\n"
             f"Actual Class: {row.get('Gender', '')}\n"
             f"Predicted Class: {pred}\n"
+            f"Actual Emotion: {row.get('Feeling', '')}\n"
+            f"Predicted Emotion: {pred_emotion}\n"
             f"Avg_F0_Hz: {row.get('Avg_F0_Hz', float('nan'))}\n"
             f"Avg_ZCR_per_s: {row.get('Avg_ZCR_per_s', float('nan'))}\n"
             f"Avg_Energy: {row.get('Avg_Energy', float('nan'))}\n"

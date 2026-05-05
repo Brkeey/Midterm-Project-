@@ -1,0 +1,21 @@
+Emotion Model Accuracy (%): 43.05
+Best Model: gradient_boosting_audio_only
+Train Samples: 452
+Test Samples: 151
+
+Used Features: Avg_F0_Hz, Avg_ZCR_per_s, Avg_Energy, Voiced_Frame_Ratio, Spectral_Centroid_Mean, Spectral_Bandwidth_Mean, Spectral_Rolloff_Mean, Spectral_Flatness_Mean
+
+Labels: Angry, Happy, Neutral, Sad, Surprised
+
+              precision    recall  f1-score   support
+
+       Angry       0.42      0.41      0.42        41
+       Happy       0.54      0.42      0.47        33
+     Neutral       0.44      0.78      0.56        40
+         Sad       0.00      0.00      0.00        19
+   Surprised       0.30      0.17      0.21        18
+
+    accuracy                           0.43       151
+   macro avg       0.34      0.36      0.33       151
+weighted avg       0.39      0.43      0.39       151
+

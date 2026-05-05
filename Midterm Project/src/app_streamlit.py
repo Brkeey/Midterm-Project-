@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 import streamlit as st
-from classifier import predict_gender_rule_based
+from classifier import predict_emotion, predict_gender_rule_based
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,18 +49,50 @@ def main() -> None:
     st.markdown("---")
     st.subheader("Single Audio Prediction")
 
-    merged = feat.merge(meta[["File_Name", "Audio_Path"]], on="File_Name", how="left")
+    merged = feat.merge(meta[["File_Name", "Audio_Path", "Feeling"]], on="File_Name", how="left")
     options = merged["File_Name"].dropna().tolist()
     selected = st.selectbox("Select an audio file", options)
 
     row = merged[merged["File_Name"] == selected].iloc[0]
     f0 = float(row["Avg_F0_Hz"]) if pd.notna(row["Avg_F0_Hz"]) else float("nan")
+    zcr = float(row["Avg_ZCR_per_s"]) if pd.notna(row["Avg_ZCR_per_s"]) else float("nan")
+    energy = float(row["Avg_Energy"]) if pd.notna(row["Avg_Energy"]) else float("nan")
+    voiced_ratio = (
+        float(row["Voiced_Frame_Ratio"]) if pd.notna(row["Voiced_Frame_Ratio"]) else float("nan")
+    )
+    sc = float(row["Spectral_Centroid_Mean"]) if pd.notna(row.get("Spectral_Centroid_Mean")) else float("nan")
+    sb = float(row["Spectral_Bandwidth_Mean"]) if pd.notna(row.get("Spectral_Bandwidth_Mean")) else float("nan")
+    sr = float(row["Spectral_Rolloff_Mean"]) if pd.notna(row.get("Spectral_Rolloff_Mean")) else float("nan")
+    sf = float(row["Spectral_Flatness_Mean"]) if pd.notna(row.get("Spectral_Flatness_Mean")) else float("nan")
+    m1 = float(row["MFCC1_Mean"]) if pd.notna(row.get("MFCC1_Mean")) else float("nan")
+    m2 = float(row["MFCC2_Mean"]) if pd.notna(row.get("MFCC2_Mean")) else float("nan")
+    m3 = float(row["MFCC3_Mean"]) if pd.notna(row.get("MFCC3_Mean")) else float("nan")
+    m4 = float(row["MFCC4_Mean"]) if pd.notna(row.get("MFCC4_Mean")) else float("nan")
+    m5 = float(row["MFCC5_Mean"]) if pd.notna(row.get("MFCC5_Mean")) else float("nan")
     pred = predict_gender_rule_based(f0)
+    pred_emotion = predict_emotion(
+        f0,
+        zcr,
+        energy,
+        voiced_ratio,
+        sc,
+        sb,
+        sr,
+        sf,
+        m1,
+        m2,
+        m3,
+        m4,
+        m5,
+    )
 
     c4, c5, c6 = st.columns(3)
     c4.metric("Predicted Class", pred)
     c5.metric("Actual Class", str(row.get("Gender", "")))
     c6.metric("Average F0 (Hz)", f"{f0:.2f}" if pd.notna(f0) else "NaN")
+    c7, c8 = st.columns(2)
+    c7.metric("Predicted Emotion", pred_emotion)
+    c8.metric("Actual Emotion", str(row.get("Feeling", "")))
 
     audio_path = str(row.get("Audio_Path", ""))
     if audio_path and Path(audio_path).exists():

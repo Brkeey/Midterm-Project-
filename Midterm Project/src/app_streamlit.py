@@ -3,13 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 import streamlit as st
-from classifier import predict_emotion, predict_gender_rule_based
+from classifier import predict_emotion_from_row, predict_gender_rule_based
+from extract_features import resolve_audio_path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 META_PATH = ROOT / "data" / "master_metadata.xlsx"
-FEATURES_PATH = ROOT / "outputs" / "features.csv"
+FEATURES_PATH = ROOT / "outputs" / "features_phase2.csv"
+if not FEATURES_PATH.exists():
+    FEATURES_PATH = ROOT / "outputs" / "features.csv"
 SUMMARY_PATH = ROOT / "outputs" / "evaluation_summary.txt"
+EMOTION_SUMMARY_PATH = ROOT / "outputs" / "emotion_model_summary.txt"
 STATS_PATH = ROOT / "outputs" / "class_statistics.csv"
 CM_PATH = ROOT / "outputs" / "confusion_matrix.csv"
 
@@ -23,12 +27,12 @@ def load_data():
     return meta, feat, stats, cm
 
 
-def parse_accuracy() -> str:
-    if not SUMMARY_PATH.exists():
+def parse_accuracy(summary_path: Path, key: str) -> str:
+    if not summary_path.exists():
         return "N/A"
-    txt = SUMMARY_PATH.read_text()
+    txt = summary_path.read_text()
     for line in txt.splitlines():
-        if "Overall Accuracy" in line:
+        if key in line:
             return line.split(":")[-1].strip()
     return "N/A"
 
@@ -38,13 +42,15 @@ def main() -> None:
     st.title("Speech Analysis - Rule-based Gender Classifier")
 
     meta, feat, stats, cm = load_data()
-    accuracy = parse_accuracy()
+    gender_accuracy = parse_accuracy(SUMMARY_PATH, "Overall Accuracy")
+    emotion_accuracy = parse_accuracy(EMOTION_SUMMARY_PATH, "Emotion Model Accuracy")
 
     st.subheader("Dataset Performance")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Overall Accuracy (%)", accuracy)
-    c2.metric("Total Matched Files", int(meta["Audio_Exists"].sum()))
-    c3.metric("Feature Rows", len(feat))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Gender Accuracy (%)", gender_accuracy)
+    c2.metric("Emotion Accuracy Phase-2 (%)", emotion_accuracy)
+    c3.metric("Total Matched Files", int(meta["Audio_Exists"].sum()))
+    c4.metric("Feature Rows", len(feat))
 
     st.markdown("---")
     st.subheader("Single Audio Prediction")
@@ -54,37 +60,12 @@ def main() -> None:
     selected = st.selectbox("Select an audio file", options)
 
     row = merged[merged["File_Name"] == selected].iloc[0]
-    f0 = float(row["Avg_F0_Hz"]) if pd.notna(row["Avg_F0_Hz"]) else float("nan")
-    zcr = float(row["Avg_ZCR_per_s"]) if pd.notna(row["Avg_ZCR_per_s"]) else float("nan")
-    energy = float(row["Avg_Energy"]) if pd.notna(row["Avg_Energy"]) else float("nan")
-    voiced_ratio = (
-        float(row["Voiced_Frame_Ratio"]) if pd.notna(row["Voiced_Frame_Ratio"]) else float("nan")
-    )
-    sc = float(row["Spectral_Centroid_Mean"]) if pd.notna(row.get("Spectral_Centroid_Mean")) else float("nan")
-    sb = float(row["Spectral_Bandwidth_Mean"]) if pd.notna(row.get("Spectral_Bandwidth_Mean")) else float("nan")
-    sr = float(row["Spectral_Rolloff_Mean"]) if pd.notna(row.get("Spectral_Rolloff_Mean")) else float("nan")
-    sf = float(row["Spectral_Flatness_Mean"]) if pd.notna(row.get("Spectral_Flatness_Mean")) else float("nan")
-    m1 = float(row["MFCC1_Mean"]) if pd.notna(row.get("MFCC1_Mean")) else float("nan")
-    m2 = float(row["MFCC2_Mean"]) if pd.notna(row.get("MFCC2_Mean")) else float("nan")
-    m3 = float(row["MFCC3_Mean"]) if pd.notna(row.get("MFCC3_Mean")) else float("nan")
-    m4 = float(row["MFCC4_Mean"]) if pd.notna(row.get("MFCC4_Mean")) else float("nan")
-    m5 = float(row["MFCC5_Mean"]) if pd.notna(row.get("MFCC5_Mean")) else float("nan")
+    numeric_cols = feat.select_dtypes(include="number").columns
+    feature_row = {c: float(row[c]) for c in numeric_cols if c in row.index and pd.notna(row[c])}
+
+    f0 = float(row["Avg_F0_Hz"]) if pd.notna(row.get("Avg_F0_Hz")) else float("nan")
     pred = predict_gender_rule_based(f0)
-    pred_emotion = predict_emotion(
-        f0,
-        zcr,
-        energy,
-        voiced_ratio,
-        sc,
-        sb,
-        sr,
-        sf,
-        m1,
-        m2,
-        m3,
-        m4,
-        m5,
-    )
+    pred_emotion = predict_emotion_from_row(feature_row)
 
     c4, c5, c6 = st.columns(3)
     c4.metric("Predicted Class", pred)
@@ -94,9 +75,9 @@ def main() -> None:
     c7.metric("Predicted Emotion", pred_emotion)
     c8.metric("Actual Emotion", str(row.get("Feeling", "")))
 
-    audio_path = str(row.get("Audio_Path", ""))
-    if audio_path and Path(audio_path).exists():
-        st.audio(audio_path)
+    audio_path = resolve_audio_path(Path(str(row.get("Audio_Path", ""))), project_root=ROOT)
+    if audio_path is not None:
+        st.audio(str(audio_path))
     else:
         st.warning("Audio file not found for playback.")
 

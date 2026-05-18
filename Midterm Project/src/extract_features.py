@@ -5,7 +5,38 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.io import wavfile
-import librosa
+
+from frequency_features import extract_frequency_plane_features, _empty_frequency_features
+
+
+def resolve_audio_path(audio_path: Path, project_root: Path | None = None) -> Path | None:
+    """Try common locations when metadata paths are relative."""
+    if audio_path.exists():
+        return audio_path
+
+    candidates: list[Path] = []
+    if project_root is not None:
+        candidates.append(project_root / audio_path)
+        candidates.append(project_root / audio_path.name)
+        if "Dataset" in audio_path.parts:
+            idx = audio_path.parts.index("Dataset")
+            candidates.append(project_root / "data" / Path(*audio_path.parts[idx:]))
+        if audio_path.parts[:1] == ("Midterm Project",):
+            candidates.append(project_root / Path(*audio_path.parts[1:]))
+
+    here = Path(__file__).resolve().parents[1]
+    candidates.extend(
+        [
+            here / audio_path,
+            here / "data" / "Dataset" / audio_path.name,
+            here.parent / audio_path,
+        ]
+    )
+
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return None
 
 
 def frame_signal(y: np.ndarray, frame_length: int, hop_length: int) -> np.ndarray:
@@ -20,9 +51,7 @@ def frame_signal(y: np.ndarray, frame_length: int, hop_length: int) -> np.ndarra
 def load_wav_mono(audio_path: Path) -> tuple[np.ndarray, int]:
     try:
         sr, data = wavfile.read(audio_path)
-    except ValueError:
-        # Some files may have a .wav extension but contain non-RIFF formats.
-        # Skip them gracefully.
+    except (ValueError, OSError):
         return np.array([], dtype=np.float32), 0
     y = data.astype(np.float32)
     if y.ndim == 2:
@@ -66,40 +95,18 @@ def autocorr_pitch(frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float =
     return float(sr / best_lag)
 
 
-def spectral_features_fallback(y: np.ndarray, sr: int) -> dict[str, float]:
-    n_fft = 2048
-    hop = 512
-    if len(y) < n_fft:
-        y = np.pad(y, (0, n_fft - len(y)))
-
-    window = np.hanning(n_fft)
-    freqs = np.fft.rfftfreq(n_fft, d=1.0 / sr)
-    frames = []
-    for start in range(0, len(y) - n_fft + 1, hop):
-        frames.append(y[start : start + n_fft] * window)
-    if not frames:
-        frames = [y[:n_fft] * window]
-
-    mags = np.array([np.abs(np.fft.rfft(fr)) + 1e-12 for fr in frames])
-    power = mags**2
-    mag_sum = np.sum(mags, axis=1)
-
-    centroid = np.sum(mags * freqs[None, :], axis=1) / np.maximum(mag_sum, 1e-12)
-    bandwidth = np.sqrt(
-        np.sum(mags * (freqs[None, :] - centroid[:, None]) ** 2, axis=1) / np.maximum(mag_sum, 1e-12)
-    )
-    cumulative = np.cumsum(power, axis=1)
-    threshold = 0.85 * cumulative[:, -1][:, None]
-    rolloff_idx = np.argmax(cumulative >= threshold, axis=1)
-    rolloff = freqs[np.clip(rolloff_idx, 0, len(freqs) - 1)]
-    flatness = np.exp(np.mean(np.log(mags), axis=1)) / np.maximum(np.mean(mags, axis=1), 1e-12)
-
-    return {
-        "Spectral_Centroid_Mean": float(np.mean(centroid)),
-        "Spectral_Bandwidth_Mean": float(np.mean(bandwidth)),
-        "Spectral_Rolloff_Mean": float(np.mean(rolloff)),
-        "Spectral_Flatness_Mean": float(np.mean(flatness)),
+def _empty_time_features(file_name: str, sr: int = 0) -> dict[str, float | str | int]:
+    out: dict[str, float | str | int] = {
+        "File_Name": file_name,
+        "Sample_Rate": sr,
+        "Duration_s": 0.0,
+        "Avg_F0_Hz": np.nan,
+        "Avg_ZCR_per_s": np.nan,
+        "Avg_Energy": np.nan,
+        "Voiced_Frame_Ratio": 0.0,
     }
+    out.update(_empty_frequency_features())
+    return out
 
 
 def extract_file_features(
@@ -107,52 +114,19 @@ def extract_file_features(
 ) -> dict[str, float | str | int]:
     y, sr = load_wav_mono(audio_path)
     if len(y) == 0:
-        return {
-            "File_Name": audio_path.name,
-            "Sample_Rate": sr,
-            "Duration_s": 0.0,
-            "Avg_F0_Hz": np.nan,
-            "Avg_ZCR_per_s": np.nan,
-            "Avg_Energy": np.nan,
-            "Voiced_Frame_Ratio": 0.0,
-            "Spectral_Centroid_Mean": np.nan,
-            "Spectral_Bandwidth_Mean": np.nan,
-            "Spectral_Rolloff_Mean": np.nan,
-            "Spectral_Flatness_Mean": np.nan,
-            "MFCC1_Mean": np.nan,
-            "MFCC2_Mean": np.nan,
-            "MFCC3_Mean": np.nan,
-            "MFCC4_Mean": np.nan,
-            "MFCC5_Mean": np.nan,
-        }
+        return _empty_time_features(audio_path.name, sr=sr)
 
     frame_length = int(sr * frame_ms / 1000.0)
     hop_length = max(1, int(frame_length * hop_ratio))
     if frame_length <= 2 or len(y) < frame_length:
-        return {
-            "File_Name": audio_path.name,
-            "Sample_Rate": sr,
-            "Duration_s": len(y) / sr,
-            "Avg_F0_Hz": np.nan,
-            "Avg_ZCR_per_s": np.nan,
-            "Avg_Energy": np.nan,
-            "Voiced_Frame_Ratio": 0.0,
-            "Spectral_Centroid_Mean": np.nan,
-            "Spectral_Bandwidth_Mean": np.nan,
-            "Spectral_Rolloff_Mean": np.nan,
-            "Spectral_Flatness_Mean": np.nan,
-            "MFCC1_Mean": np.nan,
-            "MFCC2_Mean": np.nan,
-            "MFCC3_Mean": np.nan,
-            "MFCC4_Mean": np.nan,
-            "MFCC5_Mean": np.nan,
-        }
+        out = _empty_time_features(audio_path.name, sr=sr)
+        out["Duration_s"] = len(y) / sr
+        return out
 
     frames = frame_signal(y, frame_length=frame_length, hop_length=hop_length)
     energy = short_term_energy(frames)
     zcr = zero_crossing_rate(frames, sr=sr)
 
-    # Voiced heuristic: above low energy floor and moderate ZCR.
     e_thr = np.percentile(energy, 35)
     z_low, z_high = np.percentile(zcr, 10), np.percentile(zcr, 90)
     voiced_mask = (energy >= e_thr) & (zcr >= z_low) & (zcr <= z_high)
@@ -168,31 +142,9 @@ def extract_file_features(
     voiced_energy = energy[voiced_mask] if np.any(voiced_mask) else energy
     voiced_zcr = zcr[voiced_mask] if np.any(voiced_mask) else zcr
 
-    sc = sb = sroll = sf = np.nan
-    m1 = m2 = m3 = m4 = m5 = np.nan
-    try:
-        centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
-        bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
-        rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
-        flatness = librosa.feature.spectral_flatness(y=y)
-        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=5)
-        sc = float(np.mean(centroid)) if centroid.size else np.nan
-        sb = float(np.mean(bandwidth)) if bandwidth.size else np.nan
-        sroll = float(np.mean(rolloff)) if rolloff.size else np.nan
-        sf = float(np.mean(flatness)) if flatness.size else np.nan
-        m1 = float(np.mean(mfcc[0])) if mfcc.shape[0] > 0 else np.nan
-        m2 = float(np.mean(mfcc[1])) if mfcc.shape[0] > 1 else np.nan
-        m3 = float(np.mean(mfcc[2])) if mfcc.shape[0] > 2 else np.nan
-        m4 = float(np.mean(mfcc[3])) if mfcc.shape[0] > 3 else np.nan
-        m5 = float(np.mean(mfcc[4])) if mfcc.shape[0] > 4 else np.nan
-    except Exception:
-        fallback = spectral_features_fallback(y=y, sr=sr)
-        sc = fallback["Spectral_Centroid_Mean"]
-        sb = fallback["Spectral_Bandwidth_Mean"]
-        sroll = fallback["Spectral_Rolloff_Mean"]
-        sf = fallback["Spectral_Flatness_Mean"]
+    freq_feats = extract_frequency_plane_features(y, sr)
 
-    return {
+    out: dict[str, float | str | int] = {
         "File_Name": audio_path.name,
         "Sample_Rate": sr,
         "Duration_s": len(y) / sr,
@@ -200,20 +152,15 @@ def extract_file_features(
         "Avg_ZCR_per_s": float(np.mean(voiced_zcr)) if len(voiced_zcr) else np.nan,
         "Avg_Energy": float(np.mean(voiced_energy)) if len(voiced_energy) else np.nan,
         "Voiced_Frame_Ratio": float(np.mean(voiced_mask)),
-        "Spectral_Centroid_Mean": sc,
-        "Spectral_Bandwidth_Mean": sb,
-        "Spectral_Rolloff_Mean": sroll,
-        "Spectral_Flatness_Mean": sf,
-        "MFCC1_Mean": m1,
-        "MFCC2_Mean": m2,
-        "MFCC3_Mean": m3,
-        "MFCC4_Mean": m4,
-        "MFCC5_Mean": m5,
     }
+    out.update(freq_feats)
+    return out
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract F0/ZCR/Energy features from WAV files.")
+    parser = argparse.ArgumentParser(
+        description="Extract time-domain and frequency-plane features from WAV files."
+    )
     parser.add_argument(
         "--master-metadata",
         type=Path,
@@ -223,8 +170,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("outputs/features.csv"),
+        default=Path("outputs/features_phase2.csv"),
         help="Output CSV for extracted features",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="Project root for resolving relative audio paths",
     )
     parser.add_argument(
         "--frame-ms",
@@ -242,13 +195,15 @@ def main() -> None:
         raise ValueError("master metadata must include 'Audio_Path' column")
 
     rows: list[dict[str, float | str | int]] = []
+    skipped = 0
     for _, row in meta.iterrows():
         audio_exists = bool(row.get("Audio_Exists", True))
         audio_str = str(row.get("Audio_Path", "") or "").strip()
         if not audio_exists or not audio_str:
             continue
-        audio_path = Path(audio_str)
-        if not audio_path.exists():
+        audio_path = resolve_audio_path(Path(audio_str), project_root=args.project_root)
+        if audio_path is None:
+            skipped += 1
             continue
         feat = extract_file_features(audio_path, frame_ms=args.frame_ms)
         feat["Gender"] = row.get("Gender", "")
@@ -260,6 +215,8 @@ def main() -> None:
     out_df.to_csv(args.output, index=False)
     print(f"Feature file created: {args.output}")
     print(f"Rows: {len(out_df)}")
+    if skipped:
+        print(f"Skipped (audio not found): {skipped}")
 
 
 if __name__ == "__main__":

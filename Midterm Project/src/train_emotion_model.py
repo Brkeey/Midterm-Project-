@@ -5,15 +5,22 @@ import unicodedata
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+
+from feature_engineering import add_engineered_features, select_model_feature_columns
 
 
-FEATURE_COLS = [
+EMOTIONS = ["Angry", "Happy", "Neutral", "Sad", "Surprised"]
+
+# Phase-1 baseline columns (time + basic spectral means).
+PHASE1_FEATURE_COLS = [
     "Avg_F0_Hz",
     "Avg_ZCR_per_s",
     "Avg_Energy",
@@ -28,7 +35,6 @@ FEATURE_COLS = [
     "MFCC4_Mean",
     "MFCC5_Mean",
 ]
-EMOTIONS = ["Angry", "Happy", "Neutral", "Sad", "Surprised"]
 
 
 def normalize_text(value: object) -> str:
@@ -82,12 +88,65 @@ def normalize_emotion_label(value: object, file_name: object = "") -> str | None
     return None
 
 
+def build_candidates(random_state: int = 42) -> dict[str, Pipeline]:
+    return {
+        "gradient_boosting_phase2": Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+                (
+                    "model",
+                    GradientBoostingClassifier(
+                        random_state=random_state,
+                        n_estimators=200,
+                        learning_rate=0.05,
+                        max_depth=3,
+                        subsample=0.8,
+                    ),
+                ),
+            ]
+        ),
+        "random_forest_phase2": Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+                (
+                    "model",
+                    RandomForestClassifier(
+                        n_estimators=400,
+                        max_depth=None,
+                        min_samples_leaf=2,
+                        class_weight="balanced_subsample",
+                        random_state=random_state,
+                        n_jobs=-1,
+                    ),
+                ),
+            ]
+        ),
+        "gradient_boosting_audio_only": Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                (
+                    "model",
+                    GradientBoostingClassifier(
+                        random_state=random_state,
+                        n_estimators=80,
+                        learning_rate=0.02,
+                        max_depth=2,
+                        subsample=0.65,
+                    ),
+                ),
+            ]
+        ),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train emotion classifier from extracted audio features.")
     parser.add_argument(
         "--features",
         type=Path,
-        default=Path("outputs/features.csv"),
+        default=Path("outputs/features_phase2.csv"),
         help="Path to extracted features CSV",
     )
     parser.add_argument(
@@ -108,29 +167,44 @@ def parse_args() -> argparse.Namespace:
         default=0.25,
         help="Test split ratio",
     )
+    parser.add_argument(
+        "--phase",
+        type=int,
+        default=2,
+        choices=[1, 2],
+        help="1 = Phase-1 baseline features only, 2 = frequency-plane + engineered features",
+    )
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    features = pd.read_csv(args.features)
-    metadata = pd.read_excel(args.metadata)
-
+def prepare_labeled_frame(features: pd.DataFrame, metadata: pd.DataFrame) -> pd.DataFrame:
     df = features.merge(metadata[["File_Name", "Feeling"]], on="File_Name", how="left")
     df["Emotion"] = df.apply(
         lambda row: normalize_emotion_label(row.get("Feeling", ""), row.get("File_Name", "")),
         axis=1,
     )
     df = df.dropna(subset=["Emotion"]).copy()
-    df = df[df["Emotion"].isin(EMOTIONS)].copy()
-    available_features = [c for c in FEATURE_COLS if c in df.columns and df[c].notna().any()]
-    if len(available_features) < 4:
-        raise ValueError("Not enough feature columns found for emotion training.")
+    return df[df["Emotion"].isin(EMOTIONS)].copy()
 
+
+def main() -> None:
+    args = parse_args()
+    features = pd.read_csv(args.features)
+    metadata = pd.read_excel(args.metadata)
+    df = prepare_labeled_frame(features, metadata)
+
+    if args.phase == 2:
+        df = add_engineered_features(df)
+        feature_cols = select_model_feature_columns(df)
+    else:
+        feature_cols = [c for c in PHASE1_FEATURE_COLS if c in df.columns and df[c].notna().any()]
+
+    if len(feature_cols) < 4:
+        raise ValueError("Not enough feature columns found for emotion training.")
     if len(df) < 50:
         raise ValueError("Not enough labeled rows to train emotion model.")
 
-    x = df[available_features]
+    x = df[feature_cols]
     y = df["Emotion"]
 
     x_train, x_test, y_train, y_test = train_test_split(
@@ -141,25 +215,26 @@ def main() -> None:
         stratify=y,
     )
 
-    best_name = "gradient_boosting_audio_only"
-    model: Pipeline = Pipeline(
-        [
-            ("imputer", SimpleImputer(strategy="median")),
-            (
-                "model",
-                GradientBoostingClassifier(
-                    random_state=42,
-                    n_estimators=80,
-                    learning_rate=0.02,
-                    max_depth=2,
-                    subsample=0.65,
-                ),
-            ),
-        ]
-    )
-    model.fit(x_train, y_train)
+    candidates = build_candidates()
+    if args.phase == 1:
+        candidates = {"gradient_boosting_audio_only": candidates["gradient_boosting_audio_only"]}
 
-    y_pred = model.predict(x_test)
+    best_name = ""
+    best_model: Pipeline | None = None
+    best_cv = -1.0
+
+    for name, model in candidates.items():
+        scores = cross_val_score(model, x_train, y_train, cv=5, scoring="accuracy", n_jobs=-1)
+        mean_cv = float(np.mean(scores))
+        if mean_cv > best_cv:
+            best_cv = mean_cv
+            best_name = name
+            best_model = model
+
+    assert best_model is not None
+    best_model.fit(x_train, y_train)
+
+    y_pred = best_model.predict(x_test)
     acc = accuracy_score(y_test, y_pred)
 
     report = classification_report(y_test, y_pred, labels=EMOTIONS, zero_division=0)
@@ -171,20 +246,33 @@ def main() -> None:
     summary_path = args.output_dir / "emotion_model_summary.txt"
     cm_path = args.output_dir / "emotion_confusion_matrix.csv"
 
-    model_features = available_features
-    joblib.dump({"model": model, "feature_cols": model_features}, model_path)
+    joblib.dump(
+        {
+            "model": best_model,
+            "feature_cols": feature_cols,
+            "phase": args.phase,
+            "model_name": best_name,
+        },
+        model_path,
+    )
     cm_df.to_csv(cm_path)
     summary_path.write_text(
+        f"Phase: {args.phase}\n"
         f"Emotion Model Accuracy (%): {acc * 100:.2f}\n"
+        f"CV Accuracy (%): {best_cv * 100:.2f}\n"
         f"Best Model: {best_name}\n"
         f"Train Samples: {len(x_train)}\n"
-        f"Test Samples: {len(x_test)}\n\n"
-        f"Used Features: {', '.join(model_features)}\n\n"
+        f"Test Samples: {len(x_test)}\n"
+        f"Feature Count: {len(feature_cols)}\n\n"
+        f"Used Features: {', '.join(feature_cols)}\n\n"
         f"Labels: {', '.join(EMOTIONS)}\n\n"
         f"{report}\n"
     )
 
+    print(f"Phase: {args.phase}")
     print(f"Emotion Model Accuracy (%): {acc * 100:.2f}")
+    print(f"CV Accuracy (%): {best_cv * 100:.2f}")
+    print(f"Best Model: {best_name}")
     print(f"Saved: {model_path}")
     print(f"Saved: {summary_path}")
     print(f"Saved: {cm_path}")

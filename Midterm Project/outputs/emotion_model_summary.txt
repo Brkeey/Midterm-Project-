@@ -1,21 +1,24 @@
-Emotion Model Accuracy (%): 43.05
-Best Model: gradient_boosting_audio_only
+Phase: 2
+Emotion Model Accuracy (%): 59.60
+CV Accuracy (%): 54.88
+Best Model: gradient_boosting_phase2
 Train Samples: 452
 Test Samples: 151
+Feature Count: 100
 
-Used Features: Avg_F0_Hz, Avg_ZCR_per_s, Avg_Energy, Voiced_Frame_Ratio, Spectral_Centroid_Mean, Spectral_Bandwidth_Mean, Spectral_Rolloff_Mean, Spectral_Flatness_Mean
+Used Features: Avg_F0_Hz, Avg_ZCR_per_s, Avg_Energy, Voiced_Frame_Ratio, Spectral_Flux_Mean, Spectral_Skewness_Mean, Spectral_Kurtosis_Mean, Mel_LowBand_Ratio, Mel_MidBand_Ratio, Mel_HighBand_Ratio, Chroma_Energy_Total, Spectral_Contrast_B1, Spectral_Contrast_B2, Spectral_Contrast_B3, Spectral_Contrast_B4, Spectral_Contrast_B5, Spectral_Contrast_B6, Spectral_Contrast_Mean, MFCC1_Mean, MFCC1_Std, MFCC1_Delta_Mean, MFCC2_Mean, MFCC2_Std, MFCC2_Delta_Mean, MFCC3_Mean, MFCC3_Std, MFCC3_Delta_Mean, MFCC4_Mean, MFCC4_Std, MFCC4_Delta_Mean, MFCC5_Mean, MFCC5_Std, MFCC5_Delta_Mean, MFCC6_Mean, MFCC6_Std, MFCC6_Delta_Mean, MFCC7_Mean, MFCC7_Std, MFCC7_Delta_Mean, MFCC8_Mean, MFCC8_Std, MFCC8_Delta_Mean, MFCC9_Mean, MFCC9_Std, MFCC9_Delta_Mean, MFCC10_Mean, MFCC10_Std, MFCC10_Delta_Mean, MFCC11_Mean, MFCC11_Std, MFCC11_Delta_Mean, MFCC12_Mean, MFCC12_Std, MFCC12_Delta_Mean, MFCC13_Mean, MFCC13_Std, MFCC13_Delta_Mean, Chroma1_Mean, Chroma1_Std, Chroma2_Mean, Chroma2_Std, Chroma3_Mean, Chroma3_Std, Chroma4_Mean, Chroma4_Std, Chroma5_Mean, Chroma5_Std, Chroma6_Mean, Chroma6_Std, Chroma7_Mean, Chroma7_Std, Chroma8_Mean, Chroma8_Std, Chroma9_Mean, Chroma9_Std, Chroma10_Mean, Chroma10_Std, Chroma11_Mean, Chroma11_Std, Chroma12_Mean, Chroma12_Std, Spectral_Centroid_Mean, Spectral_Centroid_Std, Spectral_Bandwidth_Mean, Spectral_Bandwidth_Std, Spectral_Rolloff_Mean, Spectral_Rolloff_Std, Spectral_Flatness_Mean, Spectral_Flatness_Std, Log_F0, Log_Energy, F0_Energy_Product, F0_per_Centroid, Centroid_Bandwidth_Ratio, Rolloff_minus_Centroid, Noisiness_Index, Activity_Index, High_Low_Mel_Ratio, MFCC_Mean_Norm, Chroma_Variance
 
 Labels: Angry, Happy, Neutral, Sad, Surprised
 
               precision    recall  f1-score   support
 
-       Angry       0.42      0.41      0.42        41
-       Happy       0.54      0.42      0.47        33
-     Neutral       0.44      0.78      0.56        40
-         Sad       0.00      0.00      0.00        19
-   Surprised       0.30      0.17      0.21        18
+       Angry       0.68      0.68      0.68        41
+       Happy       0.58      0.58      0.58        33
+     Neutral       0.56      0.70      0.62        40
+         Sad       0.53      0.42      0.47        19
+   Surprised       0.58      0.39      0.47        18
 
-    accuracy                           0.43       151
-   macro avg       0.34      0.36      0.33       151
-weighted avg       0.39      0.43      0.39       151
+    accuracy                           0.60       151
+   macro avg       0.59      0.55      0.56       151
+weighted avg       0.60      0.60      0.59       151
 
